@@ -56,8 +56,7 @@ class Mapper:
             "dueDate": due_date,
             "dueTime": due_time,
             "priority": priority,
-            "status": status,
-            "completed": completed
+            "status": status
         }
     
     @staticmethod

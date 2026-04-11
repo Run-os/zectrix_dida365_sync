@@ -77,13 +77,27 @@ class SyncManager:
                 # 更新现有待办
                 existing_todo = zectrix_todo_map[dida_id]
                 zectrix_update_date = existing_todo.get("updateDate")
+                existing_completed = existing_todo.get("completed", False)
+                new_completed = zectrix_todo_data.get("completed", False)
                 
                 # 比较修改时间
                 if self.should_update_from_dida(dida_modified_time, zectrix_update_date):
                     logger.info(f"任务：{dida_task.get('title')}，DIDA365 ➡️ Zectrix")
+                    # 先更新任务基本信息
                     result = self.zectrix_api.update_todo(existing_todo.get("id"), zectrix_todo_data)
                     if result is None:
                         logger.warning(f"任务：{dida_task.get('title')}，❌ Zectrix 更新失败")
+                    else:
+                        # 检查状态是否需要切换
+                        if existing_completed != new_completed:
+                            logger.info(f"任务：{dida_task.get('title')}，状态切换：{existing_completed} → {new_completed}")
+                            # 调用complete接口切换状态
+                            try:
+                                logger.info(f"调用Zectrix API切换任务状态，任务ID：{existing_todo.get('id')}")
+                                result = self.zectrix_api.complete_todo(existing_todo.get("id"))
+                                logger.info(f"任务：{dida_task.get('title')}，状态切换成功，结果：{result}")
+                            except Exception as e:
+                                logger.warning(f"任务：{dida_task.get('title')}，❌ 状态切换失败：{str(e)}")
                 # else:
                     # logger.info(f"任务：{dida_task.get('title')}，Zectrix 较新，跳过更新")
             else:
@@ -257,13 +271,27 @@ class SyncManager:
                 # 更新现有待办
                 existing_todo = zectrix_todo_map[dida_id]
                 zectrix_update_date = existing_todo.get("updateDate")
+                existing_completed = existing_todo.get("completed", False)
+                new_completed = zectrix_todo_data.get("completed", False)
                 
                 # 比较修改时间
                 if self.should_update_from_dida(dida_modified_time, zectrix_update_date):
                     logger.info(f"任务：{dida_task.get('title')}，DIDA365 ➡️ Zectrix")
+                    # 先更新任务基本信息
                     result = self.zectrix_api.update_todo(existing_todo.get("id"), zectrix_todo_data)
                     if result is None:
                         logger.warning(f"任务：{dida_task.get('title')}，❌ Zectrix 更新失败")
+                    else:
+                        # 检查状态是否需要切换
+                        if existing_completed != new_completed:
+                            logger.info(f"任务：{dida_task.get('title')}，状态切换：{existing_completed} → {new_completed}")
+                            # 调用complete接口切换状态
+                            try:
+                                logger.info(f"调用Zectrix API切换任务状态，任务ID：{existing_todo.get('id')}")
+                                result = self.zectrix_api.complete_todo(existing_todo.get("id"))
+                                logger.info(f"任务：{dida_task.get('title')}，状态切换成功，结果：{result}")
+                            except Exception as e:
+                                logger.warning(f"任务：{dida_task.get('title')}，❌ 状态切换失败：{str(e)}")
                 # else:
                     # logger.info(f"任务：{dida_task.get('title')}，Zectrix 较新，跳过更新")
             else:
