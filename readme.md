@@ -4,16 +4,16 @@
 
 ### DIDA365 与 Zectrix 字段映射
 
-| DIDA365 字段     | Zectrix 字段               | 映射说明                                                                |
-| ---------------- | -------------------------- | ----------------------------------------------------------------------- |
-| `title`        | `title`                  | 直接映射                                                                |
-| `content`      | `description`            | 直接映射，同时在描述末尾添加DIDA365任务ID标记                           |
-| `dueDate`      | `dueDate`                | DIDA365的ISO 8601格式转换为 `yyyy-MM-dd`                              |
-| `dueDate`      | `dueTime`                | 从DIDA365的ISO 8601格式中提取时间部分，转换为 `HH:mm`                 |
-| `priority`     | `priority`               | DIDA365的优先级（0/1/3/5）映射到Zectrix的优先级（0/1/2）                |
+| DIDA365 字段   | Zectrix 字段           | 映射说明                                                                |
+|----------------|------------------------|-------------------------------------------------------------------------|
+| `title`        | `title`                | 直接映射                                                                |
+| `content`      | `description`          | 直接映射，同时在描述末尾添加DIDA365任务ID标记                           |
+| `dueDate`      | `dueDate`              | DIDA365的ISO 8601格式转换为 `yyyy-MM-dd`                                |
+| `dueDate`      | `dueTime`              | 从DIDA365的ISO 8601格式中提取时间部分，转换为 `HH:mm`                   |
+| `priority`     | `priority`             | DIDA365的优先级（0/1/3/5）映射到Zectrix的优先级（0/1/2）                |
 | `status`       | `status` / `completed` | DIDA365的状态（0/2）映射到Zectrix的状态（0/1）和completed（false/true） |
-| `id`           | `description`            | 存储在Zectrix的description字段中，格式为 `[DIDA365:{task_id}]`        |
-| `modifiedTime` | 同步记录                   | 用于冲突检测                                                            |
+| `id`           | `description`          | 存储在Zectrix的description字段中，格式为 `[DIDA365:{task_id}]`          |
+| `modifiedTime` | 同步记录               | 用于冲突检测                                                            |
 
 ### ID 映射方案
 
@@ -120,7 +120,7 @@
 ### 4.1 错误类型与处理
 
 | 错误类型       | 处理策略                                 |
-| -------------- | ---------------------------------------- |
+|----------------|------------------------------------------|
 | 网络错误       | 重试3次，每次间隔递增（1s, 3s, 5s）      |
 | API错误（4xx） | 记录错误并跳过该项目，继续同步其他项目   |
 | API错误（5xx） | 重试3次，每次间隔递增（1s, 3s, 5s）      |
@@ -146,12 +146,12 @@
 
 ### 5.2 配置选项
 
-| 配置项                | 说明                                                                                    | 默认值        |
-| --------------------- | --------------------------------------------------------------------------------------- | ------------- |
-| `SYNC_INTERVAL`     | 同步间隔（分钟）                                                                        | 5             |
-| `SYNC_DIRECTION`    | 同步方向（bidirectional/unidirectional_dida_to_zectrix/unidirectional_zectrix_to_dida） | bidirectional |
-| `TARGET_PROJECT_ID` | DIDA365目标项目ID                                                                       | 收集箱        |
-| `SYNC_COMPLETED`    | 是否同步已完成任务                                                                      | false         |
+| 配置项            | 说明                                                                                    | 默认值        |
+|-------------------|-----------------------------------------------------------------------------------------|---------------|
+| `SYNC_INTERVAL`   | 同步间隔（分钟）                                                                        | 5             |
+| `SYNC_DIRECTION`  | 同步方向（bidirectional/unidirectional_dida_to_zectrix/unidirectional_zectrix_to_dida） | bidirectional |
+| `DIDA_PROJECT_ID` | DIDA365目标项目ID                                                                       | 收集箱        |
+| `SYNC_COMPLETED`  | 是否同步已完成任务                                                                      | false         |
 
 ## 6. 同步状态记录与追踪
 

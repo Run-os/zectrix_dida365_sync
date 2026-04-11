@@ -1,0 +1,13 @@
+# Zectrix API 配置
+API_BASE=https://cloud.zectrix.com/open/v1
+API_KEY=your_zectrix_api_key_here
+DEVICE_ID=your_device_mac_id_here
+
+# DIDA365 配置
+DIDA_TOKEN=your_dida365_token_here
+DIDA_PROJECT_ID=your_DIDA_PROJECT_ID_here
+
+# sync
+SYNC_INTERVAL=60
+SYNC_DIRECTION=bidirectional
+SYNC_COMPLETED=False
