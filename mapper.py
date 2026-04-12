@@ -1,17 +1,40 @@
 import re
 from datetime import datetime
+import pytz
+
 
 class Mapper:
+    @staticmethod
+    def _parse_dida_datetime(date_str):
+        """解析DIDA日期字符串，兼容Z和+0000等时区格式"""
+        if not date_str:
+            return None
+
+        normalized = date_str.strip()
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+
+        # 将 +0800 / -0500 规范为 +08:00 / -05:00
+        tz_match = re.search(r"([+-]\d{2})(\d{2})$", normalized)
+        if tz_match:
+            normalized = normalized[:-5] + \
+                tz_match.group(1) + ":" + tz_match.group(2)
+
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+
     @staticmethod
     def dida_to_zectrix(dida_task):
         """将DIDA365任务转换为Zectrix待办"""
         # 提取DIDA365任务ID
         dida_id = dida_task.get("id")
-        
+
         # 转换标题和内容
         title = dida_task.get("title", "")
         content = dida_task.get("content", "")
-        
+
         # 转换截止日期和时间
         due_date = None
         due_time = None
@@ -23,25 +46,32 @@ class Mapper:
             due_time = None
         elif dida_due_date:
             try:
-                dt = datetime.fromisoformat(dida_due_date.replace("Z", "+00:00"))
-                due_date = dt.strftime("%Y-%m-%d")
+                dt = Mapper._parse_dida_datetime(dida_due_date)
+                if not dt:
+                    raise ValueError("invalid dida dueDate")
+
+                local_tz = pytz.timezone("Asia/Shanghai")
+                dt_local = dt.astimezone(
+                    local_tz) if dt.tzinfo else local_tz.localize(dt)
+
+                due_date = dt_local.strftime("%Y-%m-%d")
                 # 检查是否是全天任务
                 is_all_day = dida_task.get("isAllDay", False)
                 # 如果不是全天任务，提取时间
                 if not is_all_day:
                     # 检查时间是否为00:00
-                    if dt.hour != 0 or dt.minute != 0:
-                        due_time = dt.strftime("%H:%M")
+                    if dt_local.hour != 0 or dt_local.minute != 0:
+                        due_time = dt_local.strftime("%H:%M")
             except Exception:
                 pass
-        
+
         # 转换优先级
         priority = Mapper.map_priority(dida_task.get("priority", 0))
-        
+
         # 转换状态
         status = 1 if dida_task.get("status", 0) == 2 else 0
         completed = status == 1
-        
+
         # 构建描述，包含DIDA365任务ID
         description = content
         if dida_id:
@@ -49,7 +79,7 @@ class Mapper:
                 description += f" [DIDA365:{dida_id}]"
             else:
                 description = f"[DIDA365:{dida_id}]"
-        
+
         return {
             "title": title,
             "description": description,
@@ -58,20 +88,20 @@ class Mapper:
             "priority": priority,
             "status": status
         }
-    
+
     @staticmethod
     def zectrix_to_dida(zectrix_todo):
         """将Zectrix待办转换为DIDA365任务"""
         # 解析描述，提取DIDA365任务ID
         description = zectrix_todo.get("description", "")
         dida_id = Mapper.extract_dida_id(description)
-        
+
         # 提取纯描述内容（不含DIDA365任务ID）
         content = Mapper.remove_dida_id(description)
-        
+
         # 转换标题
         title = zectrix_todo.get("title", "")
-        
+
         # 转换截止日期和时间
         due_date = None
         start_date = None
@@ -105,13 +135,13 @@ class Mapper:
                 start_date = due_date
             except Exception:
                 pass
-        
+
         # 转换优先级
         priority = Mapper.reverse_map_priority(zectrix_todo.get("priority", 0))
-        
+
         # 转换状态
         status = 2 if zectrix_todo.get("completed", False) else 0
-        
+
         result = {
             "id": dida_id,
             "title": title,
@@ -119,14 +149,14 @@ class Mapper:
             "priority": priority,
             "status": status
         }
-        
+
         # 只有当due_date不为空时才添加dueDate和startDate字段
         if due_date:
             result["dueDate"] = due_date
             result["startDate"] = start_date
-        
+
         return result
-    
+
     @staticmethod
     def map_priority(dida_priority):
         """映射DIDA365优先级到Zectrix优先级"""
@@ -137,7 +167,7 @@ class Mapper:
             5: 2   # 高 -> 紧急
         }
         return priority_map.get(dida_priority, 0)
-    
+
     @staticmethod
     def reverse_map_priority(zectrix_priority):
         """映射Zectrix优先级到DIDA365优先级"""
@@ -147,7 +177,7 @@ class Mapper:
             2: 5   # 紧急 -> 高
         }
         return priority_map.get(zectrix_priority, 0)
-    
+
     @staticmethod
     def extract_dida_id(description):
         """从描述中提取DIDA365任务ID"""
@@ -157,7 +187,7 @@ class Mapper:
         if match:
             return match.group(1)
         return None
-    
+
     @staticmethod
     def remove_dida_id(description):
         """从描述中移除DIDA365任务ID"""

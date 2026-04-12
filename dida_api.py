@@ -4,6 +4,7 @@ from error_handler import retry_on_error, handle_api_error
 
 logger = logging.getLogger(__name__)
 
+
 class DidaAPI:
     def __init__(self, token):
         self.base_url = "https://api.dida365.com/open/v1"
@@ -11,7 +12,7 @@ class DidaAPI:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
         }
-    
+
     @retry_on_error(max_retries=3, retry_interval=1, backoff_factor=2)
     @handle_api_error
     def get_projects(self):
@@ -20,7 +21,7 @@ class DidaAPI:
         response = requests.get(url, headers=self.headers)
         response.raise_for_status()
         return response.json()
-    
+
     @retry_on_error(max_retries=3, retry_interval=1, backoff_factor=2)
     @handle_api_error
     def get_project_tasks(self, project_id):
@@ -29,7 +30,7 @@ class DidaAPI:
         response = requests.get(url, headers=self.headers)
         response.raise_for_status()
         return response.json()
-    
+
     @retry_on_error(max_retries=3, retry_interval=1, backoff_factor=2)
     @handle_api_error
     def create_task(self, task_data):
@@ -38,7 +39,7 @@ class DidaAPI:
         response = requests.post(url, json=task_data, headers=self.headers)
         response.raise_for_status()
         return response.json()
-    
+
     @retry_on_error(max_retries=3, retry_interval=1, backoff_factor=2)
     @handle_api_error
     def update_task(self, task_id, task_data):
@@ -57,3 +58,12 @@ class DidaAPI:
         response = requests.post(url, json=task_data, headers=self.headers)
         response.raise_for_status()
         return response.json()
+
+    @retry_on_error(max_retries=3, retry_interval=1, backoff_factor=2)
+    @handle_api_error
+    def complete_task(self, project_id, task_id):
+        """将任务标记为已完成"""
+        url = f"{self.base_url}/project/{project_id}/task/{task_id}/complete"
+        response = requests.post(url, headers=self.headers)
+        response.raise_for_status()
+        return response.json() if response.text else {"success": True}
