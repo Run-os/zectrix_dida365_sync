@@ -8,6 +8,5 @@ DIDA_TOKEN=your_dida365_token_here
 DIDA_PROJECT_ID=your_DIDA_PROJECT_ID_here
 
 # sync
-SYNC_INTERVAL=60
 SYNC_DIRECTION=bidirectional
 SYNC_COMPLETED=False

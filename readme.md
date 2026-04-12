@@ -11,7 +11,7 @@ Zectrix 墨水屏待办事项与 DIDA365（滴答清单开放 API）之间的同
 - 支持 DIDA365 和 Zectrix 之间的双向同步。
 - 通过在 Zectrix 的 description 中写入 [DIDA365:任务ID] 标记来建立关联。
 - 支持标题、正文、截止日期、截止时间、优先级和完成状态同步。
-- 使用 APScheduler 提供定时同步。
+- 仅执行一次同步，完成后退出。
 - 内置重试和 API 错误处理。
 - 运行日志同时输出到控制台和 logs 目录。
 
@@ -22,7 +22,7 @@ Zectrix 墨水屏待办事项与 DIDA365（滴答清单开放 API）之间的同
 - dida_api.py: DIDA365 API 封装。
 - zectrix_api.py: Zectrix API 封装。
 - mapper.py: 两端字段和时间格式映射。
-- sync.py: 同步调度与双向同步逻辑。
+- sync.py: 单次同步与双向同步逻辑。
 - error_handler.py: 重试和 API 错误处理装饰器。
 - logger.py: 日志配置。
 - test.py: 本地验证脚本。
@@ -43,16 +43,16 @@ pip install -r requirements.txt
 
 项目通过 .env 文件加载配置。当前代码实际读取的变量如下：
 
-| 变量名          | 必填 | 默认值                            | 说明                               |
-|-----------------|------|-----------------------------------|------------------------------------|
-| API_BASE        | 否   | https://cloud.zectrix.com/open/v1 | Zectrix API 基础地址               |
-| API_KEY         | 是   | 无                                | Zectrix API Key                    |
-| DEVICE_ID       | 是   | 无                                | Zectrix 设备 ID，通常是 MAC 地址   |
-| DIDA_TOKEN      | 是   | 无                                | DIDA365 Bearer Token               |
-| SYNC_INTERVAL   | 否   | 300                               | 定时同步间隔，单位是秒             |
-| SYNC_DIRECTION  | 否   | bidirectional                     | 目前已读取，但同步逻辑仍是双向同步 |
-| DIDA_PROJECT_ID | 否   | inbox                             | DIDA365 目标项目 ID                |
-| SYNC_COMPLETED  | 否   | false                             | 是否同步已完成任务                 |
+| 变量名          | 必填 | 默认值                            | 说明                                 |
+|-----------------|------|-----------------------------------|--------------------------------------|
+| API_BASE        | 否   | https://cloud.zectrix.com/open/v1 | Zectrix API 基础地址                 |
+| API_KEY         | 是   | 无                                | Zectrix API Key                      |
+| DEVICE_ID       | 是   | 无                                | Zectrix 设备 ID，通常是 MAC 地址     |
+| DIDA_TOKEN      | 是   | 无                                | DIDA365 Bearer Token                 |
+| SYNC_INTERVAL   | 否   | 300                               | 保留配置项，当前版本不会启动定时同步 |
+| SYNC_DIRECTION  | 否   | bidirectional                     | 目前已读取，但同步逻辑仍是双向同步   |
+| DIDA_PROJECT_ID | 否   | inbox                             | DIDA365 目标项目 ID                  |
+| SYNC_COMPLETED  | 否   | false                             | 是否同步已完成任务                   |
 
 示例：
 
@@ -68,7 +68,7 @@ DIDA_PROJECT_ID=inbox
 SYNC_COMPLETED=false
 ```
 
-注意：代码读取的是 DIDA_TOKEN，不是 dida_token。
+注意：代码读取的是 DIDA_TOKEN，不是 dida_token。SYNC_INTERVAL 可以保留在 .env 中，但当前版本不会使用它启动定时同步。
 
 ## 运行方式
 
@@ -78,7 +78,7 @@ SYNC_COMPLETED=false
 python main.py
 ```
 
-程序启动后会先执行一次同步；如果 SYNC_INTERVAL 大于 0，还会继续以后台调度器的方式周期执行。
+程序启动后会执行一次同步，完成后退出。
 
 ## 验证脚本
 
@@ -146,6 +146,7 @@ Zectrix 没有可直接保存外部 ID 的字段，所以项目使用 descriptio
 - 当前代码虽然读取了 SYNC_DIRECTION，但实际同步流程仍是双向同步。
 - 当前没有持久化的同步状态文件，上次同步时间只保存在运行内存中。
 - DIDA365 项目同步默认使用 DIDA_PROJECT_ID 指定的项目，不会自动选择多个项目。
+- 目前不会在后台定时重复执行，程序只运行一次同步流程。
 
 ## 相关文档
 

@@ -1,7 +1,5 @@
 import logging
-import time
 from datetime import datetime
-from apscheduler.schedulers.background import BackgroundScheduler
 from mapper import Mapper
 
 logger = logging.getLogger(__name__)
@@ -12,7 +10,6 @@ class SyncManager:
         self.dida_api = dida_api
         self.zectrix_api = zectrix_api
         self.config = config
-        self.scheduler = BackgroundScheduler()
         self.last_sync_time = None
 
     @staticmethod
@@ -56,21 +53,6 @@ class SyncManager:
             logger.error(f"❌ 同步失败: {str(e)}")
             # 抛出异常，停止同步服务
             raise
-
-    def start_scheduler(self):
-        """启动定时同步任务"""
-        # 添加定时任务
-        self.scheduler.add_job(
-            self.sync,
-            'interval',
-            seconds=self.config.sync_interval,
-            id='sync_job',
-            replace_existing=True
-        )
-
-        # 启动调度器
-        self.scheduler.start()
-        # logger.info(f"定时同步任务已启动，间隔：{self.config.sync_interval}秒")
 
     def should_update_from_dida(self, dida_modified_time, zectrix_update_date):
         """判断是否应该从DIDA更新到Zectrix"""
@@ -306,9 +288,3 @@ class SyncManager:
                             except Exception as e:
                                 logger.warning(
                                     f"任务：{zectrix_todo.get('title')}，DIDA ID 回写 Zectrix 失败：{str(e)}")
-
-    def stop_scheduler(self):
-        """停止定时同步任务"""
-        if self.scheduler.running:
-            self.scheduler.shutdown()
-            logger.info("定时同步任务已停止")

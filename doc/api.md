@@ -6,23 +6,23 @@
 
 项目通过 .env 注入配置，`Config` 会在启动时读取并校验这些变量：
 
-| 变量名          | 必填 | 默认值                            | 说明                       |
-|-----------------|------|-----------------------------------|----------------------------|
-| API_BASE        | 否   | https://cloud.zectrix.com/open/v1 | Zectrix API 基础地址       |
-| API_KEY         | 是   | 无                                | Zectrix API Key            |
-| DEVICE_ID       | 是   | 无                                | Zectrix 设备 ID            |
-| DIDA_TOKEN      | 是   | 无                                | DIDA365 Bearer Token       |
-| SYNC_INTERVAL   | 否   | 300                               | 定时同步间隔，单位是秒     |
-| SYNC_DIRECTION  | 否   | bidirectional                     | 当前读取但尚未影响同步分支 |
-| DIDA_PROJECT_ID | 否   | inbox                             | DIDA365 同步目标项目       |
-| SYNC_COMPLETED  | 否   | false                             | 是否同步已完成任务         |
+| 变量名          | 必填 | 默认值                            | 说明                                 |
+|-----------------|------|-----------------------------------|--------------------------------------|
+| API_BASE        | 否   | https://cloud.zectrix.com/open/v1 | Zectrix API 基础地址                 |
+| API_KEY         | 是   | 无                                | Zectrix API Key                      |
+| DEVICE_ID       | 是   | 无                                | Zectrix 设备 ID                      |
+| DIDA_TOKEN      | 是   | 无                                | DIDA365 Bearer Token                 |
+| SYNC_INTERVAL   | 否   | 300                               | 保留配置项，当前版本不会启动定时同步 |
+| SYNC_DIRECTION  | 否   | bidirectional                     | 当前读取但尚未影响同步分支           |
+| DIDA_PROJECT_ID | 否   | inbox                             | DIDA365 同步目标项目                 |
+| SYNC_COMPLETED  | 否   | false                             | 是否同步已完成任务                   |
 
 程序启动流程：
 
 1. 加载 .env。
 2. 创建 DidaAPI 和 ZectrixAPI 客户端。
 3. 执行一次双向同步。
-4. 如果 SYNC_INTERVAL 大于 0，则启动后台调度器持续同步。
+4. 完成后退出，不再启动后台定时任务。
 
 ## 2. DIDA365 API
 
