@@ -131,7 +131,7 @@ class Mapper:
                 # 转换为本地时区的0点，再转换为UTC
                 dt_local = local_tz.localize(dt)
                 dt_utc = dt_local.astimezone(pytz.utc)
-                due_date = dt_utc.strftime("%Y-%m-%d") + "T00:00:00Z"
+                due_date = dt_utc.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
                 start_date = due_date
             except Exception:
                 pass

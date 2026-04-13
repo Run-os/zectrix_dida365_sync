@@ -156,6 +156,105 @@ def test_backfill_zectrix_link_after_creating_dida_task():
         return False
 
 
+def test_no_reverse_sync_after_dida_to_zectrix():
+    """测试DIDA365同步至Zectrix后，下次同步不应将Zectrix旧数据反向覆盖DIDA365"""
+    try:
+        class FakeConfig:
+            DIDA_PROJECT_ID = "project_1"
+            sync_completed = True
+
+        # 用户在DIDA365中修改了截止时间，modifiedTime = T2
+        dida_modified_time = "2024-01-15T10:00:00.000Z"
+        dida_modified_ts = 1705312800  # Unix timestamp for 2024-01-15T10:00:00Z
+
+        # 模拟上次同步完成时间 T3 > T2（上次同步将DIDA数据写入Zectrix，导致Zectrix updateDate = T3）
+        last_sync_ts = dida_modified_ts + 120  # T3
+
+        class FakeDidaAPI:
+            def __init__(self):
+                self.tasks = [{
+                    "id": "dida_1",
+                    "title": "测试任务",
+                    "content": "",
+                    "dueDate": "2024-01-15T10:00:00.000Z",
+                    "priority": 0,
+                    "status": 0,
+                    "modifiedTime": dida_modified_time,
+                    "projectId": "project_1"
+                }]
+                self.update_calls = []
+
+            def get_project_tasks(self, project_id):
+                return {"tasks": list(self.tasks)}
+
+            def update_task(self, task_id, task_data):
+                self.update_calls.append((task_id, dict(task_data)))
+                return task_data
+
+            def create_task(self, task_data):
+                return task_data
+
+            def complete_task(self, project_id, task_id):
+                return {"success": True}
+
+        class FakeZectrixAPI:
+            def __init__(self):
+                self.todos = [{
+                    "id": "z1",
+                    "title": "测试任务",
+                    "description": "[DIDA365:dida_1]",
+                    "dueDate": "2024-01-15",
+                    "dueTime": "18:00",
+                    "priority": 0,
+                    "completed": False,
+                    # updateDate = T3（由上次同步写入，晚于DIDA的modifiedTime T2）
+                    "updateDate": last_sync_ts
+                }]
+                self.update_calls = []
+
+            def get_todos(self, status=None):
+                return [dict(todo) for todo in self.todos]
+
+            def update_todo(self, todo_id, todo_data):
+                self.update_calls.append((todo_id, dict(todo_data)))
+                return todo_data
+
+            def complete_todo(self, todo_id):
+                return True
+
+        dida_api = FakeDidaAPI()
+        zectrix_api = FakeZectrixAPI()
+        sync_manager = SyncManager(dida_api, zectrix_api, FakeConfig())
+
+        # 注入上次同步完成时间（模拟跨次运行状态）
+        sync_manager.last_sync_completion_time = last_sync_ts
+
+        sync_manager.sync()
+
+        # 不应触发反向 Zectrix→DIDA 更新
+        assert len(dida_api.update_calls) == 0, \
+            f"不应触发反向DIDA更新，但实际触发了: {dida_api.update_calls}"
+
+        # 场景2：用户在Zectrix侧手动修改（updateDate > last_sync_ts），此时应允许同步
+        dida_api2 = FakeDidaAPI()
+        zectrix_api2 = FakeZectrixAPI()
+        zectrix_api2.todos[0]["updateDate"] = last_sync_ts + 300  # 用户改动发生在上次同步之后
+
+        sync_manager2 = SyncManager(dida_api2, zectrix_api2, FakeConfig())
+        sync_manager2.last_sync_completion_time = last_sync_ts
+
+        sync_manager2.sync()
+
+        # Zectrix侧有真实改动，应触发 Zectrix→DIDA 更新
+        assert len(dida_api2.update_calls) >= 1, \
+            f"Zectrix侧有真实改动时，应触发DIDA更新，但实际未触发"
+
+        return True
+    except Exception as e:
+        logger.error(f"反向同步防护测试失败: {str(e)}")
+        return False
+
+
 def main():
     """运行所有测试"""
     logger.info("开始测试...")
@@ -169,7 +268,10 @@ def main():
     # 测试新建任务后的关联回写
     link_backfill_test = test_backfill_zectrix_link_after_creating_dida_task()
 
-    if config_test and mapper_test and link_backfill_test:
+    # 测试跨次运行的反向同步防护
+    reverse_sync_test = test_no_reverse_sync_after_dida_to_zectrix()
+
+    if mapper_test and link_backfill_test and reverse_sync_test:
         logger.info("所有测试通过！")
     else:
         logger.error("测试失败！")

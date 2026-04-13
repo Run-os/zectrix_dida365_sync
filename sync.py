@@ -1,8 +1,14 @@
+import json
 import logging
+import os
 from datetime import datetime
 from mapper import Mapper
 
 logger = logging.getLogger(__name__)
+
+_SYNC_STATE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "sync_state.json"
+)
 
 
 class SyncManager:
@@ -11,6 +17,29 @@ class SyncManager:
         self.zectrix_api = zectrix_api
         self.config = config
         self.last_sync_time = None
+        self.last_sync_completion_time = self._load_last_sync_time()
+
+    def _load_last_sync_time(self):
+        """从状态文件加载上次同步完成的 Unix 时间戳"""
+        try:
+            if os.path.exists(_SYNC_STATE_FILE):
+                with open(_SYNC_STATE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("last_sync_completion_time")
+        except Exception:
+            pass
+        return None
+
+    def _save_last_sync_time(self):
+        """将当前 UTC 时间戳保存为上次同步完成时间"""
+        try:
+            from datetime import timezone
+            ts = int(datetime.now(timezone.utc).timestamp())
+            with open(_SYNC_STATE_FILE, "w", encoding="utf-8") as f:
+                json.dump({"last_sync_completion_time": ts}, f)
+            self.last_sync_completion_time = ts
+        except Exception as e:
+            logger.warning(f"保存同步状态失败: {str(e)}")
 
     @staticmethod
     def _extract_created_task_id(result):
@@ -48,6 +77,7 @@ class SyncManager:
 
             # 更新最后同步时间
             self.last_sync_time = datetime.now()
+            self._save_last_sync_time()
             logger.info("✅ 同步任务全部完成")
         except Exception as e:
             logger.error(f"❌ 同步失败: {str(e)}")
@@ -239,6 +269,18 @@ class SyncManager:
                 original_task = dida_task_map[dida_id]
                 dida_modified_time = original_task.get("modifiedTime")
                 # logger.info(f"找到对应DIDA365任务：{original_task.get('title')}，修改时间：{dida_modified_time}")
+
+                # 如果Zectrix的更新时间不超过上次同步完成时间，说明该时间戳由上次同步写入，
+                # 并非用户在Zectrix侧主动修改，跳过反向更新以避免覆盖DIDA中的最新数据。
+                if (
+                    self.last_sync_completion_time
+                    and zectrix_update_date
+                    and zectrix_update_date <= self.last_sync_completion_time
+                ):
+                    logger.info(
+                        f"任务：{zectrix_todo.get('title')}，"
+                        f"Zectrix更新时间未超过上次同步完成时间，跳过反向更新")
+                    continue
 
                 # 比较修改时间
                 if self.should_update_from_zectrix(zectrix_update_date, dida_modified_time):
