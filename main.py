@@ -1,9 +1,9 @@
 import logging
-from config import Config
-from dida_api import DidaAPI
-from zectrix_api import ZectrixAPI
-from sync import SyncManager
-from logger import setup_logger
+from src.zectrix_sync.config import Config
+from src.zectrix_sync.dida_api import DidaAPI
+from src.zectrix_sync.zectrix_api import ZectrixAPI
+from src.zectrix_sync.sync import SyncManager
+from src.zectrix_sync.logger import setup_logger
 
 # 配置日志
 setup_logger()

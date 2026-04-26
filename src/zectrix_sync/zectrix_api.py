@@ -1,6 +1,6 @@
 import requests
 import logging
-from error_handler import retry_on_error, handle_api_error
+from .error_handler import retry_on_error, handle_api_error
 
 logger = logging.getLogger(__name__)
 
@@ -77,5 +77,14 @@ class ZectrixAPI:
         """标记待办完成/取消完成"""
         url = f"{self.base_url}/todos/{todo_id}/complete"
         response = requests.put(url, headers=self.headers)
+        response.raise_for_status()
+        return True
+
+    @retry_on_error(max_retries=3, retry_interval=1, backoff_factor=2)
+    @handle_api_error
+    def delete_todo(self, todo_id):
+        """删除待办"""
+        url = f"{self.base_url}/todos/{todo_id}"
+        response = requests.delete(url, headers=self.headers)
         response.raise_for_status()
         return True

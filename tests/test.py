@@ -1,11 +1,12 @@
 import logging
 import unicodedata
-from config import Config
-from dida_api import DidaAPI
-from zectrix_api import ZectrixAPI
-from mapper import Mapper
-from sync import SyncManager
-from logger import setup_logger
+from io import StringIO
+from src.zectrix_sync.config import Config
+from src.zectrix_sync.dida_api import DidaAPI
+from src.zectrix_sync.zectrix_api import ZectrixAPI
+from src.zectrix_sync.mapper import Mapper
+from src.zectrix_sync.sync import SyncManager
+from src.zectrix_sync.logger import setup_logger
 
 # 配置日志
 setup_logger()
@@ -459,10 +460,179 @@ def test_sync_loads_unfinished_dida_tasks_via_status_filter():
 
         sync_manager.sync()
 
-        assert dida_api.calls == [0], f"DIDA 过滤接口调用异常: {dida_api.calls}"
+        assert dida_api.calls == [0, 2], f"DIDA 过滤接口调用异常: {dida_api.calls}"
         return True
     except Exception as e:
         logger.error(f"DIDA未完成任务过滤接口测试失败: {str(e)}")
+        return False
+
+
+def test_complete_linkage_from_dida_to_zectrix():
+    """测试规则2：当DIDA任务已完成时，联动完成对应Zectrix任务"""
+    try:
+        class FakeConfig:
+            DIDA_PROJECT_ID = "project_1"
+            sync_completed = True
+
+        class FakeDidaAPI:
+            def get_tasks(self, status=0):
+                if status == 0:
+                    return []
+                if status == 2:
+                    return [{
+                        "id": "dida_done_1",
+                        "projectId": "project_1",
+                        "title": "已完成任务",
+                        "content": "",
+                        "status": 2,
+                        "kind": "TEXT",
+                        "modifiedTime": "2024-01-15T10:00:00.000Z"
+                    }]
+                return []
+
+            def complete_task(self, project_id, task_id):
+                return {"success": True}
+
+            def update_task(self, task_id, task_data):
+                return task_data
+
+            def create_task(self, task_data):
+                return task_data
+
+        class FakeZectrixAPI:
+            def __init__(self):
+                self.complete_calls = []
+                self.todos = [{
+                    "id": "z_done_1",
+                    "title": "已完成任务",
+                    "description": "[DIDA365:dida_done_1]",
+                    "dueDate": None,
+                    "dueTime": None,
+                    "priority": 0,
+                    "completed": False,
+                    "updateDate": 200
+                }]
+
+            def get_todos(self, status=None):
+                return [dict(todo) for todo in self.todos]
+
+            def complete_todo(self, todo_id):
+                self.complete_calls.append(todo_id)
+                return True
+
+            def delete_todo(self, todo_id):
+                return True
+
+            def update_todo(self, todo_id, todo_data):
+                return todo_data
+
+            def create_todo(self, todo_data):
+                return todo_data
+
+        dida_api = FakeDidaAPI()
+        zectrix_api = FakeZectrixAPI()
+        sync_manager = SyncManager(dida_api, zectrix_api, FakeConfig())
+
+        sync_manager.sync()
+
+        assert zectrix_api.complete_calls == ["z_done_1"], \
+            f"DIDA完成态联动到Zectrix失败: {zectrix_api.complete_calls}"
+        return True
+    except Exception as e:
+        logger.error(f"DIDA->Zectrix完成态联动测试失败: {str(e)}")
+        return False
+
+
+def test_delete_zectrix_when_repeating_task_completed():
+    """测试规则3：Zectrix已完成且任务为重复任务时，仅删除Zectrix任务"""
+    try:
+        class FakeConfig:
+            DIDA_PROJECT_ID = "project_1"
+            sync_completed = True
+
+        class FakeDidaAPI:
+            def __init__(self):
+                self.complete_calls = []
+                self.update_calls = []
+                self.create_calls = []
+
+            def get_tasks(self, status=0):
+                if status == 0:
+                    return [{
+                        "id": "dida_repeat_1",
+                        "projectId": "project_1",
+                        "title": "重复任务",
+                        "content": "",
+                        "status": 0,
+                        "kind": "TEXT",
+                        "repeatFlag": "RRULE:FREQ=DAILY",
+                        "modifiedTime": "2024-01-15T10:00:00.000Z"
+                    }]
+                if status == 2:
+                    return []
+                return []
+
+            def complete_task(self, project_id, task_id):
+                self.complete_calls.append((project_id, task_id))
+                return {"success": True}
+
+            def update_task(self, task_id, task_data):
+                self.update_calls.append((task_id, dict(task_data)))
+                return task_data
+
+            def create_task(self, task_data):
+                self.create_calls.append(dict(task_data))
+                return task_data
+
+        class FakeZectrixAPI:
+            def __init__(self):
+                self.delete_calls = []
+                self.complete_calls = []
+                self.todos = [{
+                    "id": "z_repeat_1",
+                    "title": "重复任务",
+                    "description": "[DIDA365:dida_repeat_1]",
+                    "dueDate": None,
+                    "dueTime": None,
+                    "priority": 0,
+                    "completed": True,
+                    "updateDate": 300
+                }]
+
+            def get_todos(self, status=None):
+                return [dict(todo) for todo in self.todos]
+
+            def delete_todo(self, todo_id):
+                self.delete_calls.append(todo_id)
+                return True
+
+            def complete_todo(self, todo_id):
+                self.complete_calls.append(todo_id)
+                return True
+
+            def update_todo(self, todo_id, todo_data):
+                return todo_data
+
+            def create_todo(self, todo_data):
+                return todo_data
+
+        dida_api = FakeDidaAPI()
+        zectrix_api = FakeZectrixAPI()
+        sync_manager = SyncManager(dida_api, zectrix_api, FakeConfig())
+
+        sync_manager.sync()
+
+        assert zectrix_api.delete_calls == ["z_repeat_1"], \
+            f"重复任务旧周期未删除: {zectrix_api.delete_calls}"
+        assert dida_api.complete_calls == [], \
+            f"重复任务不应回写完成到DIDA: {dida_api.complete_calls}"
+        assert dida_api.update_calls == [], \
+            f"重复任务不应回写更新到DIDA: {dida_api.update_calls}"
+        assert dida_api.create_calls == [], \
+            f"重复任务不应在该分支创建DIDA任务: {dida_api.create_calls}"
+        return True
+    except Exception as e:
+        logger.error(f"重复任务完成后删除Zectrix测试失败: {str(e)}")
         return False
 
 
@@ -609,6 +779,83 @@ def test_task_log_visual_alignment():
         return False
 
 
+def test_complete_linkage_log_includes_title():
+    """测试完成态联动日志包含任务标题"""
+    try:
+        class FakeConfig:
+            DIDA_PROJECT_ID = "project_1"
+            sync_completed = True
+
+        class FakeDidaAPI:
+            def __init__(self):
+                self.tasks = [{
+                    "id": "dida_1",
+                    "projectId": "project_1",
+                    "title": "联动测试任务",
+                    "content": "",
+                    "status": 0,
+                    "priority": 0,
+                    "kind": "TEXT",
+                    "modifiedTime": "2024-01-15T10:00:00.000Z"
+                }]
+
+            def get_tasks(self, status=0):
+                return list(self.tasks)
+
+            def complete_task(self, project_id, task_id):
+                return {"success": True}
+
+            def update_task(self, task_id, task_data):
+                return task_data
+
+            def create_task(self, task_data):
+                return task_data
+
+        class FakeZectrixAPI:
+            def __init__(self):
+                self.todos = [{
+                    "id": "z1",
+                    "title": "联动测试任务",
+                    "description": "[DIDA365:dida_1]",
+                    "completed": True,
+                    "updateDate": 200
+                }]
+
+            def get_todos(self, status=None):
+                return [dict(todo) for todo in self.todos]
+
+            def complete_todo(self, todo_id):
+                return True
+
+            def update_todo(self, todo_id, todo_data):
+                return todo_data
+
+            def create_todo(self, todo_data):
+                return todo_data
+
+        log_stream = StringIO()
+        sync_logger = logging.getLogger("src.zectrix_sync.sync")
+        sync_logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler(log_stream)
+        sync_logger.addHandler(handler)
+
+        try:
+            dida_api = FakeDidaAPI()
+            zectrix_api = FakeZectrixAPI()
+            sync_manager = SyncManager(dida_api, zectrix_api, FakeConfig())
+            sync_manager.sync()
+        finally:
+            sync_logger.removeHandler(handler)
+
+        log_text = log_stream.getvalue()
+        assert "完成态联动：Zectrix任务已完成，标记DIDA365任务完成" in log_text, "未触发完成态联动日志"
+        assert "任务标题：联动测试任务" in log_text, f"完成态联动日志未包含标题: {log_text}"
+        return True
+    except Exception as e:
+        logger.error(f"完成态联动日志标题测试失败: {str(e)}")
+        return False
+
+
 def main():
     """运行所有测试"""
     logger.info("开始测试...")
@@ -631,13 +878,22 @@ def main():
     # 测试同步时通过 status=0 获取 DIDA 未完成任务
     unfinished_filter_test = test_sync_loads_unfinished_dida_tasks_via_status_filter()
 
+    # 测试规则2：DIDA 已完成联动完成 Zectrix
+    dida_complete_linkage_test = test_complete_linkage_from_dida_to_zectrix()
+
+    # 测试规则3：重复任务在 Zectrix 已完成时仅删除 Zectrix
+    repeating_delete_test = test_delete_zectrix_when_repeating_task_completed()
+
     # 测试只同步 TEXT 和 CHECKLIST
     note_kind_filter_test = test_skip_note_kind_tasks()
 
     # 测试任务日志中英混排视觉对齐
     task_log_alignment_test = test_task_log_visual_alignment()
 
-    if mapper_test and link_backfill_test and reverse_sync_test and fingerprint_skip_test and unfinished_filter_test and note_kind_filter_test and task_log_alignment_test:
+    # 测试完成态联动日志包含任务标题
+    complete_linkage_log_title_test = test_complete_linkage_log_includes_title()
+
+    if mapper_test and link_backfill_test and reverse_sync_test and fingerprint_skip_test and unfinished_filter_test and dida_complete_linkage_test and repeating_delete_test and note_kind_filter_test and task_log_alignment_test and complete_linkage_log_title_test:
         logger.info("所有测试通过！")
     else:
         logger.error("测试失败！")

@@ -44,14 +44,14 @@ pip install -r requirements.txt
 
 项目通过 .env 文件加载配置。当前代码实际读取的变量如下：
 
-| 变量名          | 必填 | 默认值                            | 说明                               |
-|-----------------|------|-----------------------------------|------------------------------------|
-| API_BASE        | 是   | https://cloud.zectrix.com/open/v1 | Zectrix API 基础地址               |
-| API_KEY         | 是   | 无                                | Zectrix API Key                    |
-| DEVICE_ID       | 是   | 无                                | Zectrix 设备 ID，通常是 MAC 地址   |
-| DIDA_TOKEN      | 是   | 无                                | DIDA365 Bearer Token               |
-| DIDA_PROJECT_ID | 是   | inbox                             | DIDA365 目标项目 ID                |
-| SYNC_COMPLETED  | 否   | false                             | 是否同步已完成任务                 |
+| 变量名          | 必填 | 默认值                            | 说明                             |
+| --------------- | ---- | --------------------------------- | -------------------------------- |
+| API_BASE        | 是   | https://cloud.zectrix.com/open/v1 | Zectrix API 基础地址             |
+| API_KEY         | 是   | 无                                | Zectrix API Key                  |
+| DEVICE_ID       | 是   | 无                                | Zectrix 设备 ID，通常是 MAC 地址 |
+| DIDA_TOKEN      | 是   | 无                                | DIDA365 Bearer Token             |
+| DIDA_PROJECT_ID | 是   | inbox                             | DIDA365 目标项目 ID              |
+| SYNC_COMPLETED  | 否   | false                             | 是否同步已完成任务               |
 
 示例：
 

@@ -1,6 +1,6 @@
 import requests
 import logging
-from error_handler import retry_on_error, handle_api_error
+from .error_handler import retry_on_error, handle_api_error
 
 logger = logging.getLogger(__name__)
 

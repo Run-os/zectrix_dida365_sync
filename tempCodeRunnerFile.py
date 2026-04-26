@@ -1,1 +1,0 @@
-                zectrix_todo.get("title"),

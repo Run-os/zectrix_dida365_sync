@@ -3,13 +3,14 @@ import logging
 import os
 import unicodedata
 from datetime import datetime
-from mapper import Mapper
+from .mapper import Mapper
 
 logger = logging.getLogger(__name__)
 
-_SYNC_STATE_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "sync_state.json"
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
+_SYNC_STATE_FILE = os.path.join(_PROJECT_ROOT, "data", "sync_state.json")
 
 
 class SyncManager:
@@ -125,6 +126,12 @@ class SyncManager:
         return kind in SyncManager._SYNCABLE_DIDA_KINDS
 
     @staticmethod
+    def _is_recurring_dida_task(dida_task):
+        """repeatFlag 非空则视为重复任务"""
+        repeat_flag = dida_task.get("repeatFlag")
+        return bool(str(repeat_flag).strip()) if repeat_flag is not None else False
+
+    @staticmethod
     def _normalize_text(value):
         """统一文本比较口径：空值转空字符串并去首尾空白"""
         if value is None:
@@ -178,6 +185,8 @@ class SyncManager:
         """执行同步"""
         try:
             logger.info("🔄 同步任务开始")
+            logger.info(
+                "================================================================")
             self.bidirectional_sync()
 
             # 更新最后同步时间
@@ -233,11 +242,18 @@ class SyncManager:
 
     def bidirectional_sync(self):
         """双向同步，避免循环更新"""
-        # 仅获取未完成任务，项目 ID 只在新建任务时使用。
-        dida_tasks = self.dida_api.get_tasks(status=0)
-        if dida_tasks is None:
+        # 获取未完成与已完成任务：未完成用于常规同步，已完成用于完成态联动。
+        dida_open_tasks = self.dida_api.get_tasks(status=0)
+        if dida_open_tasks is None:
             logger.warning("获取DIDA365未完成任务失败，跳过同步")
             return
+
+        dida_completed_tasks = self.dida_api.get_tasks(status=2)
+        if dida_completed_tasks is None:
+            logger.warning("获取DIDA365已完成任务失败，按空列表处理")
+            dida_completed_tasks = []
+
+        dida_tasks = list(dida_open_tasks) + list(dida_completed_tasks)
 
         dida_task_map = {}
         syncable_dida_tasks = []
@@ -262,6 +278,7 @@ class SyncManager:
                 zectrix_todo_map[dida_id] = todo
 
         # 先做完成态联动，避免后续常规更新把状态拉回。
+        deleted_repeating_zectrix_todo_ids = set()
         for zectrix_todo in zectrix_todos:
             description = zectrix_todo.get("description", "")
             dida_id = Mapper.extract_dida_id(description)
@@ -276,11 +293,46 @@ class SyncManager:
                 if not self._is_syncable_dida_kind(dida_task):
                     continue
                 dida_status = dida_task.get("status", 0)
+                is_recurring = self._is_recurring_dida_task(dida_task)
+
+                # 规则3：Zectrix 已完成且该任务为重复任务时，仅删除 Zectrix 任务。
+                if zectrix_completed and is_recurring and zectrix_todo_id:
+                    self._log_task_info(
+                        dida_task.get("title"),
+                        f"重复任务且Zectrix已完成，删除Zectrix旧周期任务，任务ID：{zectrix_todo_id}"
+                    )
+                    deleted = self.zectrix_api.delete_todo(zectrix_todo_id)
+                    if deleted:
+                        deleted_repeating_zectrix_todo_ids.add(zectrix_todo_id)
+                    else:
+                        self._log_task_warning(
+                            dida_task.get("title"),
+                            f"❌ 删除Zectrix旧周期任务失败，任务ID：{zectrix_todo_id}"
+                        )
+                    continue
+
+                # 规则2：DIDA 已完成时，联动完成 Zectrix 任务。
+                if dida_status == 2 and not zectrix_completed and zectrix_todo_id:
+                    self._log_task_info(
+                        dida_task.get("title"),
+                        f"DIDA已完成，联动完成Zectrix任务，任务ID：{zectrix_todo_id}"
+                    )
+                    result = self.zectrix_api.complete_todo(zectrix_todo_id)
+                    if result:
+                        zectrix_todo["completed"] = True
+                    else:
+                        self._log_task_warning(
+                            dida_task.get("title"),
+                            f"❌ DIDA已完成联动Zectrix失败，任务ID：{zectrix_todo_id}"
+                        )
+                    continue
+
                 if zectrix_completed and dida_status != 2:
                     project_id = dida_task.get(
                         "projectId") or self.config.DIDA_PROJECT_ID
+                    task_title = dida_task.get("title", "")
                     logger.info(
-                        f"完成态联动：Zectrix任务已完成，标记DIDA365任务完成，任务ID：{dida_id}")
+                        f"完成态联动：Zectrix任务已完成，标记DIDA365任务完成，任务ID：{dida_id}，任务标题：{task_title}")
                     result = self.dida_api.complete_task(project_id, dida_id)
                     if result is None:
                         logger.warning(
@@ -301,7 +353,9 @@ class SyncManager:
                         logger.warning(
                             f"完成态联动失败：Zectrix任务完成失败，任务ID：{zectrix_todo_id}，错误：{str(e)}")
 
-        logger.info("⌛️DIDA365 To Zectrix 同步检查中...")
+        logger.info(
+            "================================================================")
+        logger.info("💡DIDA365 To Zectrix 同步检查中...")
         # 同步DIDA365到Zectrix
         for dida_task in syncable_dida_tasks:
             # 跳过已完成任务（如果配置了不同步已完成任务）
@@ -322,7 +376,7 @@ class SyncManager:
                 if self._is_fingerprint_unchanged(dida_task, existing_todo):
                     self._log_task_info(
                         dida_task.get("title"),
-                        "核心字段未变化，跳过"
+                        "→ 核心字段未变化，跳过"
                     )
                     continue
 
@@ -378,14 +432,17 @@ class SyncManager:
                         "❌ Zectrix 新建失败"
                     )
 
-        logger.info("===================================================")
+        logger.info(
+            "================================================================")
 
-
-        logger.info("⌛️Zectrix To DIDA365 同步检查中...")
+        logger.info("💡Zectrix To DIDA365 同步检查中...")
         # 同步Zectrix到DIDA365
         for zectrix_todo in zectrix_todos:
+            if zectrix_todo.get("id") in deleted_repeating_zectrix_todo_ids:
+                continue
+
             # 跳过已完成任务（如果配置了不同步已完成任务）
-            
+
             if not self.config.sync_completed and zectrix_todo.get("completed"):
                 continue
 
@@ -411,7 +468,7 @@ class SyncManager:
                 if self._is_fingerprint_unchanged(original_task, zectrix_todo):
                     self._log_task_info(
                         zectrix_todo.get("title"),
-                        "核心字段未变化，跳过"
+                        "→ 核心字段未变化，跳过"
                     )
                     continue
 
@@ -427,7 +484,7 @@ class SyncManager:
                 ):
                     self._log_task_info(
                         zectrix_todo.get("title"),
-                        "⌛️Zectrix更新时间未超过上次同步完成时间，跳过反向更新"
+                        "⌛️ Zectrix更新时间未超过上次同步完成时间，跳过反向更新"
                     )
                     continue
 
