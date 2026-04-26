@@ -12,6 +12,8 @@ _SYNC_STATE_FILE = os.path.join(
 
 
 class SyncManager:
+    _SYNCABLE_DIDA_KINDS = {"TEXT", "CHECKLIST"}
+
     def __init__(self, dida_api, zectrix_api, config):
         self.dida_api = dida_api
         self.zectrix_api = zectrix_api
@@ -68,6 +70,62 @@ class SyncManager:
         if clean_description:
             return f"{clean_description} {marker}"
         return marker
+
+    @staticmethod
+    def _is_syncable_dida_kind(dida_task):
+        """仅同步 TEXT 和 CHECKLIST，跳过 NOTE 等其他类型"""
+        kind = str(dida_task.get("kind", "TEXT")).strip().upper()
+        return kind in SyncManager._SYNCABLE_DIDA_KINDS
+
+    @staticmethod
+    def _normalize_text(value):
+        """统一文本比较口径：空值转空字符串并去首尾空白"""
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @staticmethod
+    def _normalize_due_fingerprint(due_date, due_time):
+        """统一截止时间比较口径：日期+时间二元组"""
+        return (
+            SyncManager._normalize_text(due_date),
+            SyncManager._normalize_text(due_time)
+        )
+
+    @staticmethod
+    def _build_dida_sync_fingerprint(dida_task):
+        """构建 DIDA 侧统一字段指纹（title/content/dueDate/status）"""
+        mapped = Mapper.dida_to_zectrix(dida_task)
+        return {
+            "title": SyncManager._normalize_text(dida_task.get("title")),
+            "content": SyncManager._normalize_text(dida_task.get("content")),
+            # 统一使用映射后的本地日期/时间表达，避免时区格式差异导致误判。
+            "due": SyncManager._normalize_due_fingerprint(
+                mapped.get("dueDate"), mapped.get("dueTime")
+            ),
+            "status": 2 if dida_task.get("status", 0) == 2 else 0,
+        }
+
+    @staticmethod
+    def _build_zectrix_sync_fingerprint(zectrix_todo):
+        """构建 Zectrix 侧统一字段指纹（title/content/dueDate/status）"""
+        return {
+            "title": SyncManager._normalize_text(zectrix_todo.get("title")),
+            "content": SyncManager._normalize_text(
+                Mapper.remove_dida_id(zectrix_todo.get("description", ""))
+            ),
+            "due": SyncManager._normalize_due_fingerprint(
+                zectrix_todo.get("dueDate"), zectrix_todo.get("dueTime")
+            ),
+            "status": 2 if bool(zectrix_todo.get("completed", False)) else 0,
+        }
+
+    @staticmethod
+    def _is_fingerprint_unchanged(dida_task, zectrix_todo):
+        """判断双端核心字段是否一致：title/content/dueDate/status"""
+        dida_fp = SyncManager._build_dida_sync_fingerprint(dida_task)
+        zectrix_fp = SyncManager._build_zectrix_sync_fingerprint(zectrix_todo)
+        return dida_fp == zectrix_fp
 
     def sync(self):
         """执行同步"""
@@ -128,13 +186,20 @@ class SyncManager:
 
     def bidirectional_sync(self):
         """双向同步，避免循环更新"""
-        # 获取DIDA365项目任务
-        project_tasks = self.dida_api.get_project_tasks(
-            self.config.DIDA_PROJECT_ID)
-        if not project_tasks:
-            logger.warning("获取DIDA365项目任务失败，跳过同步")
+        # 仅获取未完成任务，项目 ID 只在新建任务时使用。
+        dida_tasks = self.dida_api.get_tasks(status=0)
+        if dida_tasks is None:
+            logger.warning("获取DIDA365未完成任务失败，跳过同步")
             return
-        dida_tasks = project_tasks.get("tasks", [])
+
+        dida_task_map = {}
+        syncable_dida_tasks = []
+        for task in dida_tasks:
+            dida_id = task.get("id")
+            if dida_id:
+                dida_task_map[dida_id] = task
+            if self._is_syncable_dida_kind(task):
+                syncable_dida_tasks.append(task)
 
         # 获取Zectrix待办列表
         zectrix_todos = self.zectrix_api.get_todos()
@@ -149,11 +214,6 @@ class SyncManager:
             if dida_id:
                 zectrix_todo_map[dida_id] = todo
 
-        # 构建DIDA365任务映射
-        dida_task_map = {}
-        for task in dida_tasks:
-            dida_task_map[task.get("id")] = task
-
         # 先做完成态联动，避免后续常规更新把状态拉回。
         for zectrix_todo in zectrix_todos:
             description = zectrix_todo.get("description", "")
@@ -166,6 +226,8 @@ class SyncManager:
 
             if dida_id in dida_task_map:
                 dida_task = dida_task_map[dida_id]
+                if not self._is_syncable_dida_kind(dida_task):
+                    continue
                 dida_status = dida_task.get("status", 0)
                 if zectrix_completed and dida_status != 2:
                     project_id = dida_task.get(
@@ -193,7 +255,7 @@ class SyncManager:
                             f"完成态联动失败：Zectrix任务完成失败，任务ID：{zectrix_todo_id}，错误：{str(e)}")
 
         # 同步DIDA365到Zectrix
-        for dida_task in dida_tasks:
+        for dida_task in syncable_dida_tasks:
             # 跳过已完成任务（如果配置了不同步已完成任务）
             if not self.config.sync_completed and dida_task.get("status") == 2:
                 continue
@@ -208,6 +270,12 @@ class SyncManager:
             if dida_id in zectrix_todo_map:
                 # 更新现有待办
                 existing_todo = zectrix_todo_map[dida_id]
+
+                if self._is_fingerprint_unchanged(dida_task, existing_todo):
+                    logger.info(
+                        f"任务：{dida_task.get('title')}，核心字段未变化，跳过 DIDA365 ➡️ Zectrix")
+                    continue
+
                 zectrix_update_date = existing_todo.get("updateDate")
                 existing_completed = existing_todo.get("completed", False)
                 new_completed = zectrix_todo_data.get("completed", False)
@@ -267,6 +335,17 @@ class SyncManager:
             if dida_id and dida_id in dida_task_map:
                 # 更新现有任务
                 original_task = dida_task_map[dida_id]
+
+                if not self._is_syncable_dida_kind(original_task):
+                    logger.info(
+                        f"任务：{zectrix_todo.get('title')}，kind={original_task.get('kind')}，跳过 NOTE 等非同步类型")
+                    continue
+
+                if self._is_fingerprint_unchanged(original_task, zectrix_todo):
+                    logger.info(
+                        f"任务：{zectrix_todo.get('title')}，核心字段未变化，跳过 Zectrix ➡️ DIDA365")
+                    continue
+
                 dida_modified_time = original_task.get("modifiedTime")
                 # logger.info(f"找到对应DIDA365任务：{original_task.get('title')}，修改时间：{dida_modified_time}")
 

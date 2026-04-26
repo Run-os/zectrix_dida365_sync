@@ -33,6 +33,16 @@ class DidaAPI:
 
     @retry_on_error(max_retries=3, retry_interval=1, backoff_factor=2)
     @handle_api_error
+    def get_tasks(self, status=0):
+        """按状态过滤任务"""
+        url = f"{self.base_url}/task/filter"
+        payload = {"status": [status]}
+        response = requests.post(url, json=payload, headers=self.headers)
+        response.raise_for_status()
+        return response.json()
+
+    @retry_on_error(max_retries=3, retry_interval=1, backoff_factor=2)
+    @handle_api_error
     def create_task(self, task_data):
         """创建任务"""
         url = f"{self.base_url}/task"

@@ -19,7 +19,7 @@ def setup_logger():
     
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        format='%(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler(log_file, encoding='utf-8'),
             stream_handler
