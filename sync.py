@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import unicodedata
 from datetime import datetime
 from mapper import Mapper
 
@@ -13,6 +14,7 @@ _SYNC_STATE_FILE = os.path.join(
 
 class SyncManager:
     _SYNCABLE_DIDA_KINDS = {"TEXT", "CHECKLIST"}
+    _TASK_NAME_WIDTH = 40
 
     def __init__(self, dida_api, zectrix_api, config):
         self.dida_api = dida_api
@@ -70,6 +72,51 @@ class SyncManager:
         if clean_description:
             return f"{clean_description} {marker}"
         return marker
+
+    @classmethod
+    def _format_task_log(cls, task_name, status_msg):
+        """统一任务日志格式：任务名按显示宽度左对齐，状态字段独立"""
+        fitted_name = cls._fit_display_width(task_name, cls._TASK_NAME_WIDTH)
+        return f"任务：{fitted_name} 状态：{status_msg}"
+
+    @staticmethod
+    def _display_width(text):
+        """按终端显示宽度计算文本长度：中文等宽字符=2，英文等窄字符=1。"""
+        total = 0
+        for ch in str(text or ""):
+            if unicodedata.combining(ch):
+                continue
+            total += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        return total
+
+    @classmethod
+    def _fit_display_width(cls, text, target_width):
+        """将任务名裁剪并补空格到指定显示宽度，保证状态列垂直对齐。"""
+        value = str(text or "")
+        if target_width <= 0:
+            return ""
+
+        if cls._display_width(value) > target_width:
+            suffix = "..."
+            suffix_width = cls._display_width(suffix)
+            kept = []
+            used_width = 0
+            for ch in value:
+                ch_width = cls._display_width(ch)
+                if used_width + ch_width + suffix_width > target_width:
+                    break
+                kept.append(ch)
+                used_width += ch_width
+            value = "".join(kept) + suffix
+
+        pad_size = max(0, target_width - cls._display_width(value))
+        return value + (" " * pad_size)
+
+    def _log_task_info(self, task_name, status_msg):
+        logger.info(self._format_task_log(task_name, status_msg))
+
+    def _log_task_warning(self, task_name, status_msg):
+        logger.warning(self._format_task_log(task_name, status_msg))
 
     @staticmethod
     def _is_syncable_dida_kind(dida_task):
@@ -254,6 +301,7 @@ class SyncManager:
                         logger.warning(
                             f"完成态联动失败：Zectrix任务完成失败，任务ID：{zectrix_todo_id}，错误：{str(e)}")
 
+        logger.info("⌛️DIDA365 To Zectrix 同步检查中...")
         # 同步DIDA365到Zectrix
         for dida_task in syncable_dida_tasks:
             # 跳过已完成任务（如果配置了不同步已完成任务）
@@ -272,8 +320,10 @@ class SyncManager:
                 existing_todo = zectrix_todo_map[dida_id]
 
                 if self._is_fingerprint_unchanged(dida_task, existing_todo):
-                    logger.info(
-                        f"任务：{dida_task.get('title')}，核心字段未变化，跳过 DIDA365 ➡️ Zectrix")
+                    self._log_task_info(
+                        dida_task.get("title"),
+                        "核心字段未变化，跳过"
+                    )
                     continue
 
                 zectrix_update_date = existing_todo.get("updateDate")
@@ -282,45 +332,60 @@ class SyncManager:
 
                 # 比较修改时间
                 if self.should_update_from_dida(dida_modified_time, zectrix_update_date):
-                    logger.info(
-                        f"任务：{dida_task.get('title')}，DIDA365 ➡️ Zectrix")
+                    self._log_task_info(
+                        dida_task.get("title"),
+                        "DIDA365 ➡️ Zectrix"
+                    )
                     # 先更新任务基本信息
                     result = self.zectrix_api.update_todo(
                         existing_todo.get("id"), zectrix_todo_data)
                     if result is None:
-                        logger.warning(
-                            f"任务：{dida_task.get('title')}，❌ Zectrix 更新失败")
+                        self._log_task_warning(
+                            dida_task.get("title"),
+                            "❌ Zectrix 更新失败"
+                        )
                     else:
                         # 检查状态是否需要切换
                         if existing_completed != new_completed:
-                            logger.info(
-                                f"任务：{dida_task.get('title')}，状态切换：{existing_completed} → {new_completed}")
+                            self._log_task_info(
+                                dida_task.get("title"),
+                                f"状态切换：{existing_completed} → {new_completed}"
+                            )
                             # 调用complete接口切换状态
                             try:
                                 logger.info(
                                     f"调用Zectrix API切换任务状态，任务ID：{existing_todo.get('id')}")
                                 result = self.zectrix_api.complete_todo(
                                     existing_todo.get("id"))
-                                logger.info(
-                                    f"任务：{dida_task.get('title')}，状态切换成功，结果：{result}")
+                                self._log_task_info(
+                                    dida_task.get("title"),
+                                    f"状态切换成功，结果：{result}"
+                                )
                             except Exception as e:
-                                logger.warning(
-                                    f"任务：{dida_task.get('title')}，❌ 状态切换失败：{str(e)}")
+                                self._log_task_warning(
+                                    dida_task.get("title"),
+                                    f"❌ 状态切换失败：{str(e)}"
+                                )
                 # else:
                     # logger.info(f"任务：{dida_task.get('title')}，Zectrix 较新，跳过更新")
             else:
                 # 创建新待办
-                logger.info(f"任务：{dida_task.get('title')}，✏️ Zectrix 新建")
+                self._log_task_info(dida_task.get("title"), "✏️ Zectrix 新建")
                 result = self.zectrix_api.create_todo(zectrix_todo_data)
                 if result is None:
-                    logger.warning(
-                        f"任务：{dida_task.get('title')}，❌ Zectrix 新建失败")
+                    self._log_task_warning(
+                        dida_task.get("title"),
+                        "❌ Zectrix 新建失败"
+                    )
 
         logger.info("===================================================")
 
+
+        logger.info("⌛️Zectrix To DIDA365 同步检查中...")
         # 同步Zectrix到DIDA365
         for zectrix_todo in zectrix_todos:
             # 跳过已完成任务（如果配置了不同步已完成任务）
+            
             if not self.config.sync_completed and zectrix_todo.get("completed"):
                 continue
 
@@ -337,13 +402,17 @@ class SyncManager:
                 original_task = dida_task_map[dida_id]
 
                 if not self._is_syncable_dida_kind(original_task):
-                    logger.info(
-                        f"任务：{zectrix_todo.get('title')}，kind={original_task.get('kind')}，跳过 NOTE 等非同步类型")
+                    self._log_task_info(
+                        zectrix_todo.get("title"),
+                        f"kind={original_task.get('kind')}，跳过 NOTE 等非同步类型"
+                    )
                     continue
 
                 if self._is_fingerprint_unchanged(original_task, zectrix_todo):
-                    logger.info(
-                        f"任务：{zectrix_todo.get('title')}，核心字段未变化，跳过 Zectrix ➡️ DIDA365")
+                    self._log_task_info(
+                        zectrix_todo.get("title"),
+                        "核心字段未变化，跳过"
+                    )
                     continue
 
                 dida_modified_time = original_task.get("modifiedTime")
@@ -356,15 +425,18 @@ class SyncManager:
                     and zectrix_update_date
                     and zectrix_update_date <= self.last_sync_completion_time
                 ):
-                    logger.info(
-                        f"任务：{zectrix_todo.get('title')}，"
-                        f"Zectrix更新时间未超过上次同步完成时间，跳过反向更新")
+                    self._log_task_info(
+                        zectrix_todo.get("title"),
+                        "⌛️Zectrix更新时间未超过上次同步完成时间，跳过反向更新"
+                    )
                     continue
 
                 # 比较修改时间
                 if self.should_update_from_zectrix(zectrix_update_date, dida_modified_time):
-                    logger.info(
-                        f"任务：{zectrix_todo.get('title')}，Zectrix ➡️ DIDA365")
+                    self._log_task_info(
+                        zectrix_todo.get("title"),
+                        "Zectrix ➡️ DIDA365"
+                    )
                     # 确保请求体包含必要的字段
                     if "id" not in dida_task_data:
                         dida_task_data["id"] = dida_id
@@ -375,14 +447,18 @@ class SyncManager:
                         dida_task_data["title"] = zectrix_todo.get("title")
                     result = self.dida_api.update_task(dida_id, dida_task_data)
                     if result is None:
-                        logger.warning(
-                            f"任务：{zectrix_todo.get('title')}，❌ DIDA365 更新失败")
+                        self._log_task_warning(
+                            zectrix_todo.get("title"),
+                            "❌ DIDA365 更新失败"
+                        )
                 else:
-                    logger.info(
-                        f"任务：{zectrix_todo.get('title')}，DIDA365 较新，跳过更新")
+                    self._log_task_info(
+                        zectrix_todo.get("title"),
+                        "DIDA365 较新，跳过更新"
+                    )
             else:
                 # 创建新任务
-                logger.info(f"任务：{zectrix_todo.get('title')}，✏️ DIDA365 新建")
+                self._log_task_info(zectrix_todo.get("title"), "✏️ DIDA365 新建")
                 # 移除id字段，因为创建API不需要
                 if "id" in dida_task_data:
                     del dida_task_data["id"]
@@ -390,8 +466,10 @@ class SyncManager:
                 dida_task_data["projectId"] = self.config.DIDA_PROJECT_ID
                 result = self.dida_api.create_task(dida_task_data)
                 if result is None:
-                    logger.warning(
-                        f"任务：{zectrix_todo.get('title')}，❌ DIDA365 新建失败")
+                    self._log_task_warning(
+                        zectrix_todo.get("title"),
+                        "❌ DIDA365 新建失败"
+                    )
                 else:
                     created_dida_id = self._extract_created_task_id(result)
                     zectrix_todo_id = zectrix_todo.get("id")
@@ -407,5 +485,7 @@ class SyncManager:
                                 zectrix_todo["description"] = updated_description
                                 zectrix_todo_map[created_dida_id] = zectrix_todo
                             except Exception as e:
-                                logger.warning(
-                                    f"任务：{zectrix_todo.get('title')}，DIDA ID 回写 Zectrix 失败：{str(e)}")
+                                self._log_task_warning(
+                                    zectrix_todo.get("title"),
+                                    f"DIDA ID 回写 Zectrix 失败：{str(e)}"
+                                )

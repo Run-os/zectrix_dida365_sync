@@ -1,1 +1,1 @@
-sync 
+                zectrix_todo.get("title"),

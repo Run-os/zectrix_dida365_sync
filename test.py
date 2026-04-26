@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 from config import Config
 from dida_api import DidaAPI
 from zectrix_api import ZectrixAPI
@@ -575,6 +576,39 @@ def test_skip_note_kind_tasks():
         return False
 
 
+def _visual_width(text):
+    total = 0
+    for ch in str(text or ""):
+        if unicodedata.combining(ch):
+            continue
+        total += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return total
+
+
+def test_task_log_visual_alignment():
+    """测试中英文混合任务名下，状态字段起始列在终端视觉上对齐"""
+    try:
+        msg_a = SyncManager._format_task_log(
+            "养老保险-老妈", "核心字段未变化，跳过 Zectrix ➡️ DIDA365"
+        )
+        msg_b = SyncManager._format_task_log(
+            "freeAI-task-001", "核心字段未变化，跳过 Zectrix ➡️ DIDA365"
+        )
+
+        marker = " 状态："
+        left_a = msg_a.split(marker, 1)[0]
+        left_b = msg_b.split(marker, 1)[0]
+
+        assert marker in msg_a and marker in msg_b, "日志格式缺少状态字段分隔标记"
+        assert _visual_width(left_a) == _visual_width(left_b), \
+            f"状态列未对齐: {msg_a} | {msg_b}"
+
+        return True
+    except Exception as e:
+        logger.error(f"任务日志视觉对齐测试失败: {str(e)}")
+        return False
+
+
 def main():
     """运行所有测试"""
     logger.info("开始测试...")
@@ -600,7 +634,10 @@ def main():
     # 测试只同步 TEXT 和 CHECKLIST
     note_kind_filter_test = test_skip_note_kind_tasks()
 
-    if mapper_test and link_backfill_test and reverse_sync_test and fingerprint_skip_test and unfinished_filter_test and note_kind_filter_test:
+    # 测试任务日志中英混排视觉对齐
+    task_log_alignment_test = test_task_log_visual_alignment()
+
+    if mapper_test and link_backfill_test and reverse_sync_test and fingerprint_skip_test and unfinished_filter_test and note_kind_filter_test and task_log_alignment_test:
         logger.info("所有测试通过！")
     else:
         logger.error("测试失败！")
